@@ -1,0 +1,276 @@
+===========================4.1==========================
+
+
+/*
+ * โปรแกรมสร้างสัญญาณ Square Wave ความถี่ 100 Hz ที่ขา PB0
+ * โดยใช้ Timer0 Normal Mode และ Overflow Interrupt
+ * CPU Frequency: 16 MHz
+ * Prescaler: 1024
+ * TCNT0 Initial Value: 178
+ */
+
+#include <avr/io.h>
+#include <avr/interrupt.h>
+
+// ค่าเริ่มต้นของ TCNT0 ที่คำนวณไว้เพื่อให้เกิด Overflow ทุก 5ms
+#define TCNT0_INITIAL_VALUE 178
+
+// ฟังก์ชันบริการการขัดจังหวะ (Interrupt Service Routine) ของ Timer0 Overflow
+// ฟังก์ชันนี้จะถูกเรียกอัตโนมัติทุกครั้งที่ Timer0 นับล้น (ทุก 5ms)
+ISR(TIMER0_OVF_vect)
+{
+    // 1. โหลดค่า 178 กลับเข้าไปใน TCNT0 ทันที
+    //    เพื่อเริ่มนับเวลา 5ms สำหรับครึ่งคาบถัดไปอย่างแม่นยำ
+    TCNT0 = TCNT0_INITIAL_VALUE;
+
+    // 2. สั่งสลับสถานะ (Toggle) ของขา PB0
+    //    (การเขียนค่า 1 ไปที่รีจิสเตอร์ PINB จะเป็นการสลับบิตใน PORTB)
+    //    ทำให้เกิดเป็นคลื่นสี่เหลี่ยม (HIGH -> LOW -> HIGH -> ...)
+    PINB = (1 << PINB0);
+}
+
+int main(void)
+{
+    // --- ส่วนของการตั้งค่า (Setup) ---
+
+    // 1. ตั้งค่าขา PB0 ให้เป็น Output
+    DDRB |= (1 << DDB0);
+
+    // 2. ตั้งค่า Timer0
+    //    - ตั้งค่า Prescaler เป็น 1024 โดยการเซ็ตบิต CS02 และ CS00 ในรีจิสเตอร์ TCCR0B
+    TCCR0B = (1 << CS02) | (1 << CS00);
+
+    // 3. โหลดค่าเริ่มต้น 178 เข้าไปใน TCNT0
+    //    เพื่อให้ Timer เริ่มนับจากค่านี้ขึ้นไปจนถึง 255
+    TCNT0 = TCNT0_INITIAL_VALUE;
+
+    // 4. เปิดใช้งาน Timer0 Overflow Interrupt
+    //    โดยการเซ็ตบิต TOIE0 ในรีจิสเตอร์ TIMSK0
+    TIMSK0 = (1 << TOIE0);
+
+    // 5. เปิดการทำงานของ Interrupt ทั้งหมด (Global Interrupt Enable)
+    sei();
+
+    // --- Loop หลัก ---
+    // ไม่ต้องทำอะไรใน Loop นี้ เพราะ Timer และ ISR จะทำงานในเบื้องหลังเอง
+    // CPU สามารถไปทำงานอื่นหรือเข้าโหมดประหยัดพลังงานได้
+    while (1)
+    {
+    }
+}
+
+===========================4.1 (Clean)==========================
+
+#include <avr/io.h>
+#include <avr/interrupt.h>
+#define TCNT0_INITIAL_VALUE 178
+ISR(TIMER0_OVF_vect)
+{
+    TCNT0 = TCNT0_INITIAL_VALUE;
+    PINB = (1 << PINB0);
+}
+
+int main(void)
+{
+    DDRB |= (1 << DDB0);
+    TCCR0B = (1 << CS02) | (1 << CS00);
+    TCNT0 = TCNT0_INITIAL_VALUE;
+    TIMSK0 = (1 << TOIE0);
+    sei();
+    while (1)
+    {
+    }
+}
+
+=========================4.2========================
+/*
+ * Checkpoint #2: สร้างสัญญาณ Square Wave 100 Hz ที่ขา OC0A
+ * โดยใช้ Timer0 CTC Mode
+ *
+ * CPU Frequency: 16 MHz
+ * Prescaler: 1024
+ * OCR0A Value: 77
+ * Output Pin: OC0A (PD6)
+ */
+
+#include <avr/io.h>
+
+int main(void)
+{
+    // --- ส่วนของการตั้งค่า (Setup) ---
+
+    // 1. ตั้งค่าขา OC0A (PD6) ให้เป็น Output
+    //    ขา PD6 ตรงกับขา Digital 6 บนบอร์ด Arduino Uno
+    DDRD |= (1 << DDD6);
+
+    // 2. ตั้งค่า Timer0 Control Register A (TCCR0A)
+    //    - ตั้งค่าโหมดเป็น CTC (WGM01 = 1)
+    //    - ตั้งค่าขา OC0A ให้สลับสถานะ (Toggle) ทุกครั้งที่เกิด Compare Match (COM0A0 = 1)
+    TCCR0A = (1 << WGM01) | (1 << COM0A0);
+
+    // 3. ตั้งค่า Timer0 Control Register B (TCCR0B)
+    //    - ตั้งค่า Prescaler เป็น 1024 โดยการเซ็ตบิต CS02 และ CS00
+    TCCR0B = (1 << CS02) | (1 << CS00);
+
+    // 4. กำหนดค่าสำหรับ Compare Match ใน OCR0A
+    //    ใส่ค่า 77 ที่เราคำนวณไว้
+    OCR0A = 77;
+
+    // --- Loop หลัก ---
+    // ไม่ต้องทำอะไรใน Loop นี้ เพราะ Timer Hardware ทำงานในเบื้องหลังให้ทั้งหมด
+    // ไม่จำเป็นต้องใช้ Interrupt (ISR) และ sei()
+    while (1)
+    {
+    }
+}
+
+=========================4.2 (clean)========================
+
+#include <avr/io.h>
+
+int main(void)
+{
+    DDRD |= (1 << DDD6);
+    TCCR0A = (1 << WGM01) | (1 << COM0A0);
+    TCCR0B = (1 << CS02) | (1 << CS00);
+    OCR0A = 77;
+    while (1)
+    {
+    }
+}
+
+
+=========================4.3=================================
+/*
+ * Checkpoint #3: ใช้ Timer1 โหมดปกติ (Normal Mode) และ Overflow Interrupt
+ * เพื่อจับเวลา 1 วินาที และนำไปนับต่อให้ครบ 10 วินาที
+ * เพื่อสลับสถานะ LED ที่ขา 13 (PB5)
+ *
+ * โค้ดนี้เขียนตามหลักการของ "ตัวอย่างที่ 4.9"
+ */
+
+#include <avr/io.h>
+#include <avr/interrupt.h>
+
+// ตัวแปรเพื่อนับวินาที (เหมือน t_count ในตัวอย่าง)
+volatile uint8_t second_counter;
+
+// ฟังก์ชันบริการการขัดจังหวะของ Timer1 Overflow
+// ทำงานทุกครั้งที่เกิดการล้นค่าใน TCNT1 (ทุก 1 วินาที)
+ISR(TIMER1_OVF_vect)
+{
+    // 1. บรรจุค่า 3036 ใหม่ลงไปใน TCNT1 ทุกครั้งที่ฟังก์ชันนี้ทำงาน
+    //    เพื่อให้การนับ 1 วินาทีในรอบถัดไปเริ่มต้นได้อย่างถูกต้อง
+    TCNT1 = 3036;
+
+    // 2. เพิ่มค่าในตัวนับวินาทีขึ้น 1 ค่า
+    second_counter++;
+
+    // 3. หากนับครบ 10 วินาที
+    if (second_counter >= 10)
+    {
+        // 3.1 ล้างค่าตัวนับให้กลับมาเป็นศูนย์
+        second_counter = 0;
+        // 3.2 กลับสถานะบิตของขา PD7 (ในตัวอย่าง)
+        //     แต่ในโจทย์นี้ เราจะกลับสถานะขา PB5 (LED ขา 13)
+        PINB = (1 << PINB5);
+    }
+}
+
+// ฟังก์ชันหลักของโปรแกรม
+int main(void)
+{
+    // ตั้งค่าเริ่มต้นให้ตัวแปรนับเป็นศูนย์
+    second_counter = 0;
+
+    // ตั้งค่าทิศทางให้บิตที่ 5 ของพอร์ต B (PB5 หรือขา 13) ทำหน้าที่ส่งออก
+    DDRB |= (1 << DDB5);
+
+    // --- ตั้งค่า Timer1 ให้เหมือนกับในตัวอย่าง 4.9 ---
+
+    // ตั้งค่า Control Register A เป็น Normal Mode
+    TCCR1A = 0x00;
+
+    // ตั้งค่า Control Register B โดยใช้ Prescaler 256 (CS12=1)
+    TCCR1B = (1 << CS12);
+
+    // ตั้งค่าเริ่มต้นของ TCNT1 เท่ากับ 3036
+    TCNT1 = 3036;
+
+    // เปิดทางการขัดจังหวะการล้นค่าใน TCNT1 (Timer Overflow Interrupt Enable)
+    TIMSK1 = (1 << TOIE1);
+
+    // เปิดทางการขัดจังหวะส่วนกลาง
+    sei();
+
+    // วนซ้ำการทำงานไม่รู้จบ (ไม่มีการทำงานใดๆ ในส่วนนี้)
+    while(1)
+    {
+    }
+}
+
+==========================4.3 (clean)============================
+
+#include <avr/io.h>
+#include <avr/interrupt.h>
+
+volatile uint8_t second_counter;
+
+ISR(TIMER1_OVF_vect)
+{
+    TCNT1 = 3036;
+    second_counter++;
+    if (second_counter >= 10)
+    {
+        second_counter = 0;
+        PINB = (1 << PINB5);
+    }
+}
+
+
+int main(void)
+{
+    second_counter = 0;
+    DDRB |= (1 << DDB5);
+    TCCR1A = 0x00;
+    TCCR1B = (1 << CS12);
+    TCNT1 = 3036;
+    TIMSK1 = (1 << TOIE1);
+    sei();
+    while(1)
+    {
+    }
+}
+
+
+TCCR1A (Timer/Counter Control Register 1 A)
+
+	การใช้งาน: TCCR1A = 0x00;
+
+	ความหมาย: เรากำหนดค่าเป็น 0 ทั้งหมด เพื่อให้แน่ใจว่าบิต WGM11 และ WGM10 เป็น 0 ซึ่งเป็นการเลือกใช้ โหมดปกติ (Normal Mode) เมื่อทำงานร่วมกับ TCCR1B
+	
+TCCR1B (Timer/Counter Control Register 1 B)
+
+	การใช้งาน: TCCR1B = (1 << CS12);
+
+	ความหมาย: ใช้สำหรับกำหนดโหมดและ Prescaler
+
+CS12: (Clock Select bit 2) การตั้งค่าบิตนี้เป็น 1 (ในขณะที่ CS11 และ CS10 เป็น 0) คือการเลือกใช้ Prescaler เท่ากับ 256
+
+TCNT1 (Timer/Counter 1 Register)
+
+	การใช้งาน: TCNT1 = 3036;
+
+	ความหมาย: เป็นรีจิสเตอร์ขนาด 16-bit ที่ใช้ "นับ" จริงๆ เราจะโหลดค่าเริ่มต้น 3036 ที่คำนวณไว้เข้าไปในรีจิสเตอร์นี้ เพื่อให้ Timer เริ่มนับจาก 3036 ไปจนถึง 65535
+
+TIMSK1 (Timer/Counter Interrupt Mask Register 1)
+
+	การใช้งาน: TIMSK1 = (1 << TOIE1);
+
+	ความหมาย: ใช้สำหรับเปิด/ปิดการใช้งาน Interrupt ของ Timer1
+
+TOIE1: (Timer/Counter 1 Overflow Interrupt Enable) การตั้งค่าบิตนี้เป็น 1 คือการ "เปิดใช้งาน" Interrupt ให้ทำงานเมื่อเกิดเหตุการณ์ Overflow (คือเมื่อ TCNT1 นับจาก 65535 วนกลับมาที่ 0)
+
+sei() (Set Global Interrupt Enable)
+
+	ความหมาย: เป็นคำสั่งที่ทำหน้าที่เหมือน "สวิตช์หลัก" เพื่ออนุญาตให้ระบบ Interrupt ทั้งหมดของ CPU ทำงานได้

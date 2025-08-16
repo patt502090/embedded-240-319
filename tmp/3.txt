@@ -1,0 +1,390 @@
+=============================================3.1=======================================================
+#define F_CPU 16000000UL
+
+#include <avr/io.h>
+#include <avr/interrupt.h>
+#include <util/delay.h>
+#include <stdlib.h>
+
+// --- ?????? Global (?????????????) ---
+volatile unsigned char raw_pinb_from_isr;
+volatile unsigned char calculated_value_from_isr;
+volatile uint8_t new_data_from_isr = 0;
+
+// --- ????? 7-Segment (?????????????) ---
+unsigned char TB7SEG[] = {
+    0b00111111, 0b00000110, 0b01011011, 0b01001111, // 0-3
+    0b01100110, 0b01101101, 0b01111101, 0b00000111, // 4-7
+    0b01111111, 0b01101111, 0b01110111, 0b01111100, // 8, 9, A, b
+    0b00111001, 0b01011110, 0b01111001, 0b01110001  // C, d, E, F
+};
+
+// --- ???????? UART (?????????????) ---
+void uart_init(void) {
+    uint16_t ubrr_value = (F_CPU / 16 / 9600) - 1;
+    UBRR0H = (unsigned char)(ubrr_value >> 8);
+    UBRR0L = (unsigned char)ubrr_value;
+    UCSR0B = (1 << TXEN0);
+    UCSR0C = (1 << UCSZ01) | (1 << UCSZ00);
+}
+void uart_transmit(unsigned char data) {
+    while (!(UCSR0A & (1 << UDRE0)));
+    UDR0 = data;
+}
+void uart_print_string(const char* str) {
+    while (*str) uart_transmit(*str++);
+}
+void uart_print_decimal(unsigned char num) {
+    char buffer[4];
+    itoa(num, buffer, 10);
+    uart_print_string(buffer);
+}
+void uart_print_hex(unsigned char byte) {
+    char hex_digits[] = "0123456789ABCDEF";
+    uart_transmit(hex_digits[byte >> 4]);
+    uart_transmit(hex_digits[byte & 0x0F]);
+}
+void uart_print_binary(unsigned char byte) {
+    uart_print_string("0b");
+    for (int i = 7; i >= 0; i--) {
+        uart_transmit((byte & (1 << i)) ? '1' : '0');
+    }
+}
+
+// ================================================================
+// ========== ???????????? Bug ????? G (Segment G) ==========
+// ================================================================
+
+// --- ???????????????? 7-Segment (?????????) ---
+void display_on_7seg(unsigned char value) {
+    if (value > 15) return;
+    
+    // ?????????????????? (???????? Common-Cathode, HIGH = ON)
+    unsigned char pattern = TB7SEG[value];
+
+    // 1. ??????????? 6 ??????? (Segment A-F) ????? PC0-PC5
+    PORTC = pattern & 0x3F; // 0x3F ??? 0b00111111
+
+    // 2. ????????????????? 6 (Segment G) ??????? PB4 ??? PORTB
+    //    ????????????????????????????? PORTB
+    if (pattern & (1 << 6)) { // ?????????? 6 (?????? G)
+        PORTB |= (1 << PB4);   // ?????? G ???? 1 -> ?????? PB4 ???? HIGH (G ???)
+    } else {
+        PORTB &= ~(1 << PB4);  // ?????? G ???? 0 -> ?????? PB4 ???? LOW (G ???)
+    }
+}
+
+// --- ISR (?????????????) ---
+ISR(PCINT0_vect) {
+    _delay_ms(20);
+    raw_pinb_from_isr = PINB;
+    calculated_value_from_isr = (~raw_pinb_from_isr) & 0x0F;
+    new_data_from_isr = 1;
+}
+
+// --- ???????? main (?????????) ---
+int main(void) {
+    // --- ??????? Hardware (?????????) ---
+    
+    // ?????????????????? C: PC0-5 (Segments A-F) ???? Output
+    DDRC = 0x3F; // 0x3F ??? 0b00111111
+    
+    // ?????????????????? B: PB4 (Segment G) ???? Output
+    // **?????????????? PB5 ????**
+    DDRB = (1 << DDB4);
+    
+    // ?????????????????? Port B: ?????????? Pull-up ????????????? PB0-PB3
+    // **?????????????? PB5 ????**
+    PORTB = 0x0F;
+
+    // --- ??????? UART ??? Interrupt (?????????????) ---
+    uart_init();
+    PCICR |= (1 << PCIE0);
+    PCMSK0 = 0x0F;
+    sei();
+    
+    uart_print_string("\r\n--- System Ready (Fixed Version) ---\r\n");
+    
+    // --- ????????????????? ---
+    display_on_7seg((~PINB) & 0x0F);
+
+    // --- Loop ???? (?????????????) ---
+    while(1) {
+        if (new_data_from_isr) {
+            
+            // --- ?????????? Print Log ---
+            uart_print_string("--- Interrupt Detected ---\r\n");
+            uart_print_string("Raw PINB       : ");
+            uart_print_binary(raw_pinb_from_isr);
+            uart_print_string("\r\n");
+            uart_print_string("Calculated Val : ");
+            uart_print_decimal(calculated_value_from_isr);
+            uart_print_string(" (Hex: 0x");
+            uart_print_hex(calculated_value_from_isr);
+            uart_print_string(")\r\n--------------------------\r\n\r\n");
+            
+            // --- ??????????????????? ---
+            display_on_7seg(calculated_value_from_isr);
+            
+            new_data_from_isr = 0;
+        }
+    }
+}
+
+
+
+
+=============================================3.2=======================================================
+#define F_CPU 16000000UL
+#include <avr/io.h>
+#include <avr/interrupt.h>
+#include <avr/pgmspace.h>
+#include <util/delay.h>
+#include <stdlib.h>
+
+// --- ?????? Global ---
+volatile unsigned char count = 0;
+volatile uint8_t new_count_to_display = 0; 
+
+// --- ????? 7-Segment ---
+const unsigned char seven_seg_table[16] PROGMEM = {
+    0b00111111, 0b00000110, 0b01011011, 0b01001111, // 0-3
+    0b01100110, 0b01101101, 0b01111101, 0b00000111, // 4-7
+    0b01111111, 0b01101111, 0b01110111, 0b01111100, // 8, 9, A, b
+    0b00111001, 0b01011110, 0b01111001, 0b01110001  // C, d, E, F
+};
+
+// --- ???????? UART ---
+void uart_init(void) {
+    uint16_t ubrr_value = (F_CPU / 16 / 9600) - 1;
+    UBRR0H = (unsigned char)(ubrr_value >> 8);
+    UBRR0L = (unsigned char)ubrr_value;
+    UCSR0B = (1 << TXEN0);
+    UCSR0C = (1 << UCSZ01) | (1 << UCSZ00);
+}
+
+void uart_transmit(unsigned char data) {
+    while (!(UCSR0A & (1 << UDRE0)));
+    UDR0 = data;
+}
+
+void uart_print_string(const char* str) {
+    while (*str) {
+        uart_transmit(*str++);
+    }
+}
+
+void uart_print_decimal(unsigned char num) {
+    char buffer[4];
+    itoa(num, buffer, 10);
+    uart_print_string(buffer);
+}
+
+// --- ???????????????? 7-Segment ---
+void display_count(unsigned char number) {
+    if (number > 15) return;
+    unsigned char pattern = pgm_read_byte(&seven_seg_table[number]);
+
+    PORTC = pattern & 0x3F;
+
+    if (pattern & (1 << 6)) {
+        PORTB |= (1 << PB0);
+    } else {
+        PORTB &= ~(1 << PB0);
+    }
+}
+
+// ================================================================
+// ========== ?????????????????????? 0-9 ==========
+// ================================================================
+
+// --- ???????? ISR ---
+ISR(INT0_vect) {
+    _delay_ms(10);
+    if (!(PIND & (1 << PIND2))) {
+        count++;
+        // ???????????????? 16 ???? 10
+        if (count >= 10) {
+            count = 0;
+        }
+        new_count_to_display = 1;
+    }
+}
+
+// --- ???????? main ---
+int main(void) {
+    DDRC = 0x3F;
+    DDRB = (1 << DDB0);
+    DDRD &= ~(1 << PD2);
+    PORTD |= (1 << PD2);
+
+    uart_init();
+    EICRA = (1 << ISC01);
+    EIMSK = (1 << INT0);
+    sei();
+
+    uart_print_string("\r\n--- Counter System Ready (0-9) ---\r\n");
+    
+    display_count(0);
+    uart_print_string("Initial count: 0\r\n");
+
+    while (1) {
+        if (new_count_to_display) {
+            new_count_to_display = 0;
+            display_count(count);
+            uart_print_string("Button Pressed! New count: ");
+            uart_print_decimal(count);
+            uart_print_string("\r\n");
+        }
+    }
+}
+
+
+============================3.3==============================
+// --- ????????????? ---
+const int segmentA = 14; // A0
+const int segmentB = 15; // A1
+const int segmentC = 16; // A2
+const int segmentD = 17; // A3
+const int segmentE = 18; // A4
+const int segmentF = 19; // A5
+const int segmentG = 12;
+const int seg1_enable = 13;
+
+const int rowPins[4] = {4, 5, 6, 7};
+const int colPins[4] = {8, 9, 10, 11};
+
+const int interruptPin = 3;
+
+// --- ?????? Global ---
+volatile bool keypress_detected = false;
+
+char keys[4][4] = {
+  {'D', 'C', 'B', 'A'},
+  {'F', '9', '6', '3'},
+  {'0', '8', '5', '2'},
+  {'E', '7', '4', '1'}
+};
+
+// --- ???????? Interrupt (ISR) ---
+void onKeyPress() {
+  // ????? ISR ????????????????? ?????????????
+  keypress_detected = true;
+}
+
+// --- ???????????????????????????????? ---
+char scanKeypad() {
+  char pressedKey = '\0';
+  for (int row = 0; row < 4; row++) {
+    // **???????????:** ??????????? (LOW) ????????????? (HIGH) ?????????????
+    for (int i = 0; i < 4; i++) {
+      digitalWrite(rowPins[i], HIGH);
+    }
+    digitalWrite(rowPins[row], LOW);
+
+    for (int col = 0; col < 4; col++) {
+      if (digitalRead(colPins[col]) == LOW) {
+        delay(20); // Debounce
+        pressedKey = keys[row][col];
+        while (digitalRead(colPins[col]) == LOW); // ???????????
+        goto key_found; // ???????????? ??????????????? loop ???????
+      }
+    }
+  }
+
+key_found:
+  // **?????:** ????????????????????? LOW ???????????????? Interrupt ??????????
+  for (int i = 0; i < 4; i++) {
+    digitalWrite(rowPins[i], LOW);
+  }
+  return pressedKey;
+}
+
+// --- ??????????????????????? 7-Segment ---
+void seg(bool a, bool b, bool c, bool d, bool e, bool f, bool g) {
+  digitalWrite(segmentA, a);
+  digitalWrite(segmentB, b);
+  digitalWrite(segmentC, c);
+  digitalWrite(segmentD, d);
+  digitalWrite(segmentE, e);
+  digitalWrite(segmentF, f);
+  digitalWrite(segmentG, g);
+}
+
+void displayHex(char key) {
+  switch (key) {
+    case '0': seg(1, 1, 1, 1, 1, 1, 0); break;
+    case '1': seg(0, 1, 1, 0, 0, 0, 0); break;
+    case '2': seg(1, 1, 0, 1, 1, 0, 1); break;
+    case '3': seg(1, 1, 1, 1, 0, 0, 1); break;
+    case '4': seg(0, 1, 1, 0, 0, 1, 1); break;
+    case '5': seg(1, 0, 1, 1, 0, 1, 1); break;
+    case '6': seg(1, 0, 1, 1, 1, 1, 1); break;
+    case '7': seg(1, 1, 1, 0, 0, 0, 0); break;
+    case '8': seg(1, 1, 1, 1, 1, 1, 1); break;
+    case '9': seg(1, 1, 1, 1, 0, 1, 1); break;
+    case 'A': seg(1, 1, 1, 0, 1, 1, 1); break;
+    case 'B': seg(0, 0, 1, 1, 1, 1, 1); break; // b
+    case 'C': seg(1, 0, 0, 1, 1, 1, 0); break;
+    case 'D': seg(0, 1, 1, 1, 1, 0, 1); break; // d
+    case 'E': seg(1, 0, 0, 1, 1, 1, 1); break; // *
+    case 'F': seg(1, 0, 0, 0, 1, 1, 1); break; // #
+    default: seg(0, 0, 0, 0, 0, 0, 0); break;
+  }
+}
+
+// --- ???????? Setup ---
+void setup() {
+  Serial.begin(9600);
+
+
+  // ?????????? 7-Segment ?????????
+  pinMode(segmentA, OUTPUT);
+  pinMode(segmentB, OUTPUT);
+  pinMode(segmentC, OUTPUT);
+  pinMode(segmentD, OUTPUT);
+  pinMode(segmentE, OUTPUT);
+  pinMode(segmentF, OUTPUT);
+  pinMode(segmentG, OUTPUT);
+  pinMode(seg1_enable, OUTPUT);
+  digitalWrite(seg1_enable, HIGH);
+
+  // ?????????? Keypad
+  for (int i = 0; i < 4; i++) {
+    pinMode(rowPins[i], OUTPUT);
+    // **?????:** ????????????????????????? LOW ?????????????? Interrupt
+    digitalWrite(rowPins[i], LOW);
+  }
+  for (int i = 0; i < 4; i++) {
+    pinMode(colPins[i], INPUT_PULLUP);
+  }
+
+  // --- ??????? Interrupt ---
+  pinMode(interruptPin, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(interruptPin), onKeyPress, FALLING);
+}
+
+// --- ???????? Loop ---
+void loop() {
+  if (keypress_detected) {
+    keypress_detected = false; // ????????????
+
+    Serial.println("Interrupt Detected! ");
+
+    char key = scanKeypad();
+
+    if (key != '\0') {
+      Serial.print("Key Found: ");
+      Serial.println(key);
+      
+
+      // ?????????????
+      if (key == '*') key = 'E';
+      else if (key == '#') key = 'F';
+
+      displayHex(key);
+    }
+
+    Serial.println("--------------------");
+  }
+}
