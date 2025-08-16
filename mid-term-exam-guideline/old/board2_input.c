@@ -17,9 +17,6 @@
 #include <stdbool.h>
 #include <string.h>
 
-/* เพิ่มไลบรารีสำหรับ Watchdog Timer */
-#include <avr/wdt.h>
-
 /*---------------- Pin definitions ----------------*/
 #define LCD_RS    PB1    /* RS ของ LCD */
 #define LCD_EN    PB2    /* EN ของ LCD */
@@ -41,11 +38,6 @@ volatile unsigned long g_ms = 0;   /* 1 ms tick จาก Timer1 */
 static unsigned int target_value = 0;    /* ค่าที่ผู้ใช้ป้อน (0–999) */
 static bool editing = false;              /* กำลังป้อนค่าอยู่หรือไม่ */
 static unsigned long idle_start_ms = 0;   /* เวลานิ่งล่าสุด ใช้นับ timeout */
-
-/* ตัวแปรสถานะสำหรับ WDT: ถ้าเป็น true จะหยุดรีเซ็ต watchdog เพื่อให้ MCU รีเซ็ตตัวเอง
- * เราใช้ volatile เพื่อให้มั่นใจว่าถูกอ่าน/เขียนอย่างถูกต้องใน ISR หรือส่วนอื่น ๆ
- */
-static volatile bool wdt_timeout = false;
 
 /*---------------- Timer1: 1 ms tick ----------------*/
 static void timer1_init_1ms(void) {
@@ -216,21 +208,6 @@ int main(void) {
     adc_init();
     lcd_init();
     usart0_init();
-    /*
-     * ตรวจสอบว่า MCU ถูกรีเซ็ตจาก WDT หรือไม่
-     * หากต้องการแจ้งเตือนผู้ใช้ สามารถเพิ่มข้อความในส่วนนี้
-     */
-    if (MCUSR & (1<<WDRF)) {
-        /* ตัวอย่าง: เขียนข้อความหรือกระพริบไฟให้ผู้ใช้ทราบว่าเกิด Watchdog reset */
-        /* ในที่นี้เราเพียงล้างแฟล็กโดยไม่มีการแจ้ง */
-    }
-    /* ล้างเหตุการณ์รีเซ็ตทั้งหมด เพื่อป้องกันการทับทวนในครั้งถัดไป */
-    MCUSR = 0;
-    /* เปิดใช้งาน Watchdog timer ที่ช่วงประมาณ 2 วินาที (WDTO_2S)
-     * หากโปรแกรมไม่เรียก wdt_reset() ภายในช่วงนี้ MCU จะรีเซ็ตเอง
-     */
-    wdt_enable(WDTO_2S);
-
     sei();
 
     idle_start_ms = g_ms;
@@ -238,55 +215,39 @@ int main(void) {
     update_lcd();
 
     for(;;) {
-        /* Timeout: 30 s ไม่มีการกด → กลับสู่พร้อม (ไฟเขียว)
-         * พร้อมทั้งตั้ง wdt_timeout = true เพื่อหยุดรีเซ็ต watchdog
-         * ทำให้ MCU รีเซ็ตตัวเองหลัง ~2 วินาที
-         */
+        /* Timeout: 30 s ไม่มีการกด → กลับสู่พร้อม (ไฟเขียว) */
         if ((g_ms - idle_start_ms) > 30000UL) {
             editing = false;
             leds_set(true, false, false);
             idle_start_ms = g_ms;
-            wdt_timeout = true;
         }
-        /* อ่านคีย์จาก keypad (คืน 0 หากไม่มีการกด) */
         char k = keypad_getkey();
-
-        if (k) {
-            /* มีการกดปุ่ม → รีเซ็ต idle timer และเข้าสู่สถานะกำลังป้อน */
-            idle_start_ms = g_ms;
-            leds_set(false, true, false); /* เหลือง: กำลังตั้งค่า */
-            editing = true;
-
-            if (k >= '0' && k <= '9') {
-                /* ต่อท้ายตัวเลข แต่ไม่เกิน 999 */
-                unsigned int newv = target_value * 10 + (k - '0');
-                if (newv <= 999) {
-                    target_value = newv;
-                    update_lcd();
-                } else {
-                    /* ถ้าค่าเกิน 999 ให้แจ้ง error ด้วยไฟแดงกระพริบสั้น ๆ */
-                    leds_set(false, false, true);
-                    _delay_ms(200);
-                    leds_set(false, true, false);
-                }
-            } else if (k == '*') {
-                /* ปุ่มล้าง */
-                target_value = 0;
+        if (!k) continue;
+        idle_start_ms = g_ms;
+        /* กำลังป้อนอยู่ → set LED เหลือง */
+        leds_set(false, true, false);
+        editing = true;
+        if (k >= '0' && k <= '9') {
+            /* ต่อท้ายตัวเลข แต่ไม่เกิน 999 */
+            unsigned int newv = target_value * 10 + (k - '0');
+            if (newv <= 999) {
+                target_value = newv;
                 update_lcd();
-            } else if (k == '#') {
-                /* ยืนยัน → ส่งไปบอร์ด 1 */
-                send_target(target_value);
-                leds_set(true, false, false); /* เขียว: พร้อมรับคำสั่งใหม่ */
-                editing = false;
-                update_lcd();
+            } else {
+                /* ถ้าค่าเกิน 999 ให้แจ้ง error ด้วยไฟแดงกระพริบสั้น ๆ */
+                leds_set(false, false, true);
+                _delay_ms(200);
+                leds_set(false, true, false);
             }
-        }
-
-        /* รีเซ็ต watchdog ถ้าไม่อยู่ในสถานะ timeout
-         * การเรียกนี้จะเกิดในทุกลูป ไม่ว่าจะมีการกดคีย์หรือไม่
-         */
-        if (!wdt_timeout) {
-            wdt_reset();
+        } else if (k == '*') {
+            target_value = 0;
+            update_lcd();
+        } else if (k == '#') {
+            /* ยืนยัน → ส่งไปบอร์ด 1 */
+            send_target(target_value);
+            leds_set(true, false, false); /* พร้อมรับคำสั่งใหม่ */
+            editing = false;
+            update_lcd();
         }
     }
     return 0;

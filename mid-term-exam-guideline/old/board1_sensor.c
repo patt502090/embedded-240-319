@@ -20,7 +20,6 @@
 #include <util/delay.h>                /* สำหรับ _delay_ms/us */
 #include <string.h>                    /* สำหรับ strcmp(), strncmp() */
 #include <stdbool.h>                   /* สำหรับประเภท bool */
-#include <avr/wdt.h>                   /* สำหรับ Watchdog Timer */
 
 /*------------------------------------------------------------------
  * พอร์ตและพินสำหรับอุปกรณ์ต่อพ่วง
@@ -50,13 +49,6 @@ static unsigned long last_serial_ms = 0;    /* เวลาล่าสุดท
 static unsigned long last_send_ms = 0;      /* เวลาล่าสุดที่ส่งสถานะไปยังบอร์ด 3 */
 static unsigned long lockout_until_ms = 0;  /* หมดเวลาช่วงกันนับซ้ำเม็ด (millis) */
 static bool have_target = false;            /* มีการตั้งเป้าหมายแล้วหรือไม่ */
-
-/*
- * ตัวแปรสำหรับ Watchdog Timer
- * หากเกิด timeout นานเกิน 30 วินาที จะตั้งค่า flag นี้ให้ true
- * แล้วหยุดป้อนอาหารให้ WDT (ไม่เรียก wdt_reset()) เพื่อให้ MCU รีเซ็ตตัวเองภายใน ~2 วินาที
- */
-static bool wdt_timeout = false;
 
 /* บัฟเฟอร์รับข้อความจาก USART (หนึ่งบรรทัด) */
 #define RX_BUF_SIZE 32
@@ -290,12 +282,6 @@ int main(void) {
     timer1_init_1ms();
     usart0_init();
     lcd_init();
-    /* เปิดใช้งาน Watchdog Timer ประมาณ 2 วินาที 
-     * หากลูปหลักไม่เรียก wdt_reset() ภายในเวลานี้ MCU จะรีเซ็ตตัวเอง 
-     * การเปิดใช้งาน WDT หลังปิด global interrupt (คล้ายตามคู่มือ) เพื่อไม่ให้รีเซ็ตทันที */
-    MCUSR &= ~(1<<WDRF);           /* ล้างแฟล็กรีเซ็ตจาก WDT ครั้งก่อน */
-    wdt_enable(WDTO_2S);           /* ตั้ง WDT timeout ≈ 2s */
-
     sei();
 
     lcd_print("Board1 Ready");
@@ -307,22 +293,13 @@ int main(void) {
 
     /* วนลูปหลักตลอดเวลา */
     for (;;) {
-        /* ป้อนอาหารให้ Watchdog ถ้ายังไม่เกิด timeout 
-         * ในกรณีปกติจะต้องเรียก wdt_reset() ในทุก ๆ รอบ
-         * หากเคยเกิด timeout (wdt_timeout=true) จะไม่รีเซ็ต WDT เพื่อให้รีบูต */
-        if (!wdt_timeout) {
-            wdt_reset();
-        }
         poll_usart_rx();
-        /* ตรวจ timeout ของสื่อสาร หากเกิน 30 วินาทีให้แสดงข้อความและหยุดป้อน WDT */
+        /* Timeout communication */
         if ((g_ms - last_serial_ms) > 30000UL) {
             lcd_gotoxy(0, 1);
             lcd_print("Timeout!       ");
-            /* กระพริบ LED13 เพื่อบอกว่ายังมีชีวิตแต่รอรีเซ็ต */
-            if (((g_ms / 500) % 2) == 0) PORTB |= (1<<LED_TIMEOUT);
+            if ((g_ms / 500) % 2 == 0) PORTB |= (1<<LED_TIMEOUT);
             else PORTB &= ~(1<<LED_TIMEOUT);
-            /* ถ้ายังไม่ตั้ง wdt_timeout ให้ตั้งและหยุดป้อน WDT */
-            wdt_timeout = true;
         } else {
             PORTB &= ~(1<<LED_TIMEOUT);
         }
