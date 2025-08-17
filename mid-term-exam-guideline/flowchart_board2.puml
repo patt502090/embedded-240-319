@@ -1,0 +1,33 @@
+@startuml
+title Flowchart: Board2 (Input Control)
+
+start
+
+:'กำหนดค่าเริ่มต้น'\n- ตั้งค่าพอร์ต ADC ช่อง A5 สำหรับ Keypad\n- ตั้งค่า LCD16x2 ตัวที่ 2\n- ตั้งค่า USART0 (9600 bps, parity even) ส่ง TARGET\n- เปิด LED3 สี (เขียว=พร้อม, เหลือง=กำลังตั้ง, แดง=ข้อผิดพลาด);\n- กำหนดตัวแปร target_value=0, editing=false;
+
+repeat
+  if (idle_time > 30s?) then (ใช่)
+    :editing ← false;\nแสดงข้อความตั้งค่าเริ่มต้นบน LCD;\nตั้ง LED เป็นสีเขียว;\nรีเซ็ตตัวจับเวลานิ่ง;
+  endif
+
+  :อ่านปุ่มจาก Keypad ADC (มีการ debounce 50ms);
+  if (มีการกดปุ่ม?) then (ใช่)
+    :รีเซ็ตตัวจับเวลานิ่ง;
+    if (คีย์เป็นตัวเลข 0–9?) then (ใช่)
+      :temp ← target_value*10 + ค่าคีย์;
+      if (temp > 999?) then (ใช่)
+        :แสดงข้อผิดพลาด (LED แดงกระพริบ);\nไม่อัปเดตค่า target;
+      else (ไม่)
+        :target_value ← temp;\nแสดง 'Set Target: target_value' บน LCD;\nตั้ง LED เป็นสีเหลือง;
+      endif
+    else if (คีย์ == '*') then
+      :target_value ← 0;\nแสดงค่า 0 และตั้ง LED เป็นสีเหลือง;
+    else if (คีย์ == '#') then
+      :ส่งข้อความ 'TARGET:' + target_value + '\\n' ผ่าน USART0 ไปบอร์ด 1;\nตั้ง LED เป็นสีเขียว;\nediting ← false;
+    endif
+  endif
+repeat while (true)
+
+stop
+
+@enduml

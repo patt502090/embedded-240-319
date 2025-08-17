@@ -1,0 +1,34 @@
+@startuml
+title ระบบควบคุมโรงงานผลิตยา (ภาพรวม)
+
+start
+
+:*Board2* ตั้งค่าเป้าหมายผ่าน Keypad;
+:*Board2* ส่งข้อความ TARGET:xxx ไปยัง Board1;
+
+if (ระดับน้ำเพียงพอ? \n(Board1 อ่าน ADC)) then (ใช่)
+  repeat
+    :*Board1* ตรวจสอบเม็ดยาด้วย HC-SR04;\n(อ่านสามครั้ง < 10cm);
+    if (ตรวจพบเม็ดยา?) then (ใช่)
+      :เพิ่มตัวนับเม็ด;
+    endif
+    :*Board1* คำนวณเปอร์เซ็นต์ความคืบหน้า;\nและระดับน้ำ (water %);
+    :*Board1* แสดง Pills/Tgt/Progress/Water บน LCD;
+    :*Board1* ส่ง PILLS:xxx และ PROGRESS:yyy ไปยัง Board3;
+    :*Board3* แสดงผลบน 7-seg และอัปเดตไฟ LED ตาม progress;
+    if (เม็ดยาครบเป้าหมาย?) then (ใช่)
+      stop
+    endif
+  repeat while (เม็ดยา < เป้าหมาย)
+  :*Board3* เริ่มการล้าง: \nเปิด Packaging 5s และ Solenoid 3s;
+  :*Board3* ส่ง RESET ไปยัง Board1;
+  :*Board1* รีเซ็ตตัวนับเม็ดและค่า progress;
+  --> start
+else (ไม่)
+  :*Board1* ระดับน้ำต่ำ – แสดงเตือนรอเติมน้ำ;
+  --> (ระดับน้ำเพียงพอ?)
+endif
+
+stop
+
+@enduml

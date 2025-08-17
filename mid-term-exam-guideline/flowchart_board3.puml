@@ -1,0 +1,56 @@
+@startuml
+'Board 3 – Monitor & Control'
+title Flowchart: Board 3 – Monitor & Control
+
+start
+
+:'INIT – Monitor & Control Board';
+note right
+  - ตั้งค่า 7-segment (4 หลัก), LED สถานะ
+  - ตั้ง Timer/Interrupt สำหรับ multiplex & blink
+  - เปิด UART (9600, 8E1) เพื่อรับจาก Board 1
+  - กำหนดตัวแปรเริ่มต้น: pills=0, progress=0, batch=0
+end note
+
+while (true)
+  :รอรับข้อมูลจาก Board 1 ผ่าน UART;
+  if (รับข้อมูลใหม่?) then (yes)
+    :วิเคราะห์ข้อความ;
+    if (ข้อความ = "PILLS:xxx") then (yes)
+      :อัพเดตจำนวนเม็ดยาปัจจุบัน;
+    else (no)
+      if (ข้อความ = "PROGRESS:yyy") then (yes)
+        :อัพเดตเปอร์เซ็นต์ความคืบหน้าปัจจุบัน;
+      else (no)
+        :ข้อมูลอื่นหรือผิดรูปแบบ – เพิกเฉย;
+      endif
+    endif
+
+    :อัพเดต 7-segment & LED ตาม pills, progress;
+
+    if (progress >= 100?) then (yes)
+      :เข้าสู่โหมดล้าง (Cleaning);
+      note right
+        - เปิด LED packaging 5 s
+        - เปิดวาล์วน้ำล้าง 3 s
+        - แสดง "CLEn" บน 7‑seg
+      end note
+      :ส่ง "RESET\n" ไปยัง Board 1;
+      :รีเซ็ต pills = 0, progress = 0;
+      :นับรอบ batch++;
+    endif
+  else (no)
+    if (ไม่มีข้อมูลเข้าเกิน 30 s?) then (yes)
+      :เข้าสู่โหมด timeout;
+      note right
+        - แสดง "----" บน 7‑seg
+        - LED แดงค้าง
+      end note
+      ' รอข้อมูลใหม่แล้วกลับสู่ลูปหลัก (ไม่มีการสร้างลูปรอแยก)
+    endif
+  endif
+endwhile
+
+stop
+
+@enduml

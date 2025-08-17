@@ -1,0 +1,39 @@
+@startuml
+title Flowchart: Board1 (Sensor & Display)
+
+start
+
+:กำหนดค่าเริ่มต้น (LCD, UART, ADC, HC-SR04, WDT);
+
+:รอรับข้อความ TARGET:xxx จาก Board2;
+
+repeat
+  :อ่านระดับน้ำผ่าน ADC1;\nwater_percent = adc_read*100/1023;
+  if (water_percent >= เกณฑ์ขั้นต่ำ?) then (ใช่)
+    break
+  else (ไม่)
+    :ระดับน้ำต่ำ – แสดงคำเตือนบน LCD;\nรอจนระดับน้ำมากขึ้น;
+  endif
+repeat while (water_percent < เกณฑ์)
+
+repeat
+  :วัดระยะด้วย HC-SR04 สามครั้ง;\nถ้าต่ำกว่า 10cm ทั้งสามครั้ง;
+  if (ตรวจพบเม็ดยา?) then (ใช่)
+    :เพิ่มตัวนับเม็ด pill_count++ และล็อก 150ms;
+  endif
+  :คำนวณ progress = pill_count/target_count*100;
+  :คำนวณ water_percent = adc_read*100/1023;
+  :อัปเดต LCD: Pils/Tgt/Pro/W;
+  :ส่งข้อความ PILLS:xxx และ PROGRESS:yyy ไป Board3;
+  if (pill_count >= target_count?) then (ใช่)
+    break
+  endif
+repeat while (pill_count < target_count)
+
+:รอรับข้อความ RESET จาก Board3;
+:รีเซ็ตตัวนับเม็ด pill_count=0 และ progress=0;
+:กลับไปรอ TARGET;
+
+stop
+
+@enduml
