@@ -1,0 +1,147 @@
+Board-1 : Sensor & Display
+
+UART (รับจาก Board-2)
+
+B2 TXD → B1 RXD (PD0)
+
+GND ร่วม
+
+UART (ส่งไป Board-3)
+
+B1 TXD (PD1) → B3 RXD
+
+GND ร่วม
+
+HC-SR04 (นับยา)
+
+TRIG → PD2
+
+ECHO → PD3 (MCU 5 V รับได้ตรง)
+
+Vcc 5 V, GND
+
+Water level (อนาล็อก) เซ็นเซอร์น้ำ AO
+
+AO → PC1/ADC1 (A1)
+
+Vcc 5 V, GND
+
+แนะนำ: C 0.1 µF ระหว่าง AO–GND เพื่อลดสัญญาณรบกวน
+
+LCD 16×2 (โหมด 4-bit)
+
+RS → PB1, EN → PB2
+
+D4→PD4, D5→PD5, D6→PD6, D7→PD7
+
+Vcc 5 V, GND, VR (10 kΩ) ปรับคอนทราสต์ระหว่าง V0–GND
+
+LED สถานะ
+
+PB5 → (R 330 Ω) → ขา Anode LED → GND
+
+จ่ายไฟ/อ้างอิง
+
+VCC 5 V → VCC, AVCC (ใส่ C 0.1 µF ใกล้ VCC/AVCC)
+
+AREF ผ่าน C 0.1 µF → GND
+
+RESET ดึงขึ้นด้วย R 10 kΩ → VCC, ปุ่มกดรีเซ็ตลง GND
+
+Board-2 : Input (Keypad ADC) & LCD
+
+UART (ส่งไป Board-1)
+
+B2 TXD (PD1) → B1 RXD (PD0)
+
+GND ร่วม
+
+Keypad-ADC (บอร์ด keypad แบบแรงดันรวม)
+
+AO → PC5/ADC5 (A5)
+
+Vcc 5 V, GND
+
+แนะนำ: C 0.1 µF จาก AO→GND (debounce ฮาร์ดแวร์)
+
+LCD 16×2 (โหมด 4-bit)
+
+RS → PB1, EN → PB2
+
+D4→PD4, D5→PD5, D6→PD6, D7→PD7
+
+Vcc 5 V, GND, โพเทน 10 kΩ ปรับคอนทราสต์
+
+Board-3 : Monitor & Control (7-segment, Solenoid)
+
+UART (รับจาก Board-1)
+
+B1 TXD (PD1) → B3 RXD (PD0)
+
+GND ร่วม
+
+4-Digit 7-segment (Common Cathode, มัลติเพล็กซ์)
+
+Segments:
+
+a→PC0, b→PC1, c→PC2, d→PC3, e→PC4, f→PC5, g→PB0
+
+แต่ละเส้นผ่าน R 220–330 Ω ไปยังขา segment
+
+Digit Select (คอมมอนคาโทดลงกราวด์ผ่านทรานซิสเตอร์):
+
+PD4 → R 4.7 kΩ → เบส NPN Q1 (2N2222) → คอลเลกเตอร์ไปคาโทดของ Digit 1 → อีมิตเตอร์ลง GND
+
+PD5 → R 4.7 kΩ → เบส Q2 → Digit 2
+
+PD6 → R 4.7 kΩ → เบส Q3 → Digit 3
+
+PD7 → R 4.7 kΩ → เบส Q4 → Digit 4
+
+เบสแต่ละตัวใส่ R pull-down 100 kΩ → GND
+
+LED สถานะ 3 สี + น้ำเงินกระพริบ
+
+PB2/PB3/PB4/PB5 → (R 330 Ω) → Anode LED → GND
+
+Solenoid Valve (12 V) (ใช้ MOSFET/ทรานซิสเตอร์ไดร์ฟ)
+
+PD3 → R 100–220 Ω → Gate N-MOSFET (เช่น IRLZ44N)
+
+Gate → R 100 kΩ → GND (pull-down)
+
+Drain → ขดลวดโซลินอยด์ → +12 V
+
+Source → GND
+
+ไดโอด 1N4007 คร่อมขดลวด (ขั้ว Cathode → +12 V, Anode → ขดลวดฝั่ง MOSFET)
+
+GND 12 V ต่อร่วมกับ GND 5 V
+
+Packaging LED
+
+PD2 → (R 330 Ω) → Anode LED → GND
+
+การสื่อสารระหว่างบอร์ด (สายสั้น ๆ ชัด ๆ)
+
+B2 TXD → B1 RXD (9600 bps, 8E1)
+
+B1 TXD → B3 RXD (9600 bps, 8E1)
+
+ทุกบอร์ดต้อง “GND ร่วมกัน”
+
+(ถ้าต้องให้ B3 ส่ง “RESET\n” กลับ B1 จริง ๆ และไม่อยากชนกันบน RX เดิม ให้ใช้ SoftwareSerial เพิ่มบน B1: เช่น B3 TXD → B1 PD4 (SoftRX))
+
+ค่าอุปกรณ์ที่แนะนำ (สรุป)
+
+ตัวต้านทาน LED/segment: 220–330 Ω ต่ออนุกรมทุกเส้นที่ขับไดโอด
+
+เบส NPN digit: 4.7 kΩ, และ pull-down 100 kΩ
+
+Gate MOSFET: 100–220 Ω series + pull-down 100 kΩ
+
+RESET pull-up: 10 kΩ → VCC
+
+Decoupling: C 0.1 µF ใกล้ VCC/AVCC ทุกบอร์ด, AREF→GND ด้วย C 0.1 µF
+
+Keypad-ADC/Water: C 0.1 µF จาก AO→GND (ลด noise)
