@@ -168,16 +168,16 @@ static void send_status_to_board3(void)
 static void handle_received_line(void)
 {
     rx_buf[rx_len] = '\0';
-    if (strncmp(rx_buf, "TARGET:", 7) == 0)
+    if (strncmp(rx_buf, "TARGET:", 7) == 0) //เช็ค 7 ตัวแรกว่าเท่ากับ "TARGET:" ไหม
     {
-        int v = atoi(rx_buf + 7);
-        if (v >= 0 && v <= 999)
+        int v = atoi(rx_buf + 7); //แปลง ส่วนตัวเลขที่ตามหลัง “TARGET:” เป็นจำนวนเต็ม
+        if (v >= 0 && v <= 999) //กรองค่าให้อยู่ในช่วงที่ระบบยอมรับ (0–999)
         {
             target_count = (unsigned)v;
             have_target = true;
         }
     }
-    else if (strcmp(rx_buf, "RESET") == 0)
+    else if (strcmp(rx_buf, "RESET") == 0) //ถ้าไม่ใช่ TARGET: ก็เช็คว่าเป็น RESET พอดีทั้งสตริงไหม
     {
         pill_count = 0;
         progress_percent = 0;
@@ -186,13 +186,13 @@ static void handle_received_line(void)
 }
 static void poll_usart_rx(void)
 {
-    while (UCSR0A & (1 << RXC0))
+    while (UCSR0A & (1 << RXC0)) //วนอ่าน “ตราบใดที่” UART มีตัวอักษรค้างอยู่ในบัฟเฟอร์รับ
     {
         char c = UDR0;
         last_serial_ms = g_ms;
-        if (c == '\r')
+        if (c == '\r') //ข้ามตัว '\r' (Carriage Return) เพื่อรองรับรูปแบบ CRLF "\r\n"
             continue;
-        if (c == '\n')
+        if (c == '\n') //ถ้าเจอ '\n' (Newline) แปลว่า “จบบรรทัด” → ไปประมวลผลทั้งบรรทัด
             handle_received_line();
         else
         {
