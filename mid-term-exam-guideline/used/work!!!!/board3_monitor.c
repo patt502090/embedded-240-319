@@ -179,6 +179,7 @@ static void poll_serial(void)
             }
             rxi = 0; // clear buffer
         } else {
+            //ถ้ายังไม่เต็ม (rxi < RXN-1) ให้เก็บอักขระ c ลง rxbuf[rxi] แล้วเพิ่ม rxi++
             if (rxi < RXN - 1) rxbuf[rxi++] = c;
             else rxi = 0;
         }
