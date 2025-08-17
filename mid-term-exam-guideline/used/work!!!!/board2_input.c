@@ -1,14 +1,25 @@
 /*
  * ========================= Board 2: Input Control =========================
- * HW wiring:
- *   Keypad (ADC ladder) : A5 (PC5)
- *   LEDs                 : GREEN=D4, YELLOW=D5, RED=D6
- *   LCD 16x2             : RS=D8, E=D9, D4=D10, D5=D11, D6=D12, D7=D13
- * Serial link (USART0, 9600 8E1):
- *   ส่ง "TARGET:xxx\n" ไปยังบอร์ด 1 เมื่อกด '#'
+ * หน้าที่หลัก:
+ *   - รับค่า “Target pills (0–999)” ผ่าน Keypad แบบ ADC ladder ที่ A5
+ *   - ดีบาวน์ 50ms + ตรวจค่านิ่ง ก่อนแปลงเป็นปุ่ม 0..9, * (ล้าง), # (ส่งค่า)
+ *   - แสดงสถานะบน LCD 16x2 (แบบ Library LiquidCrystal)
+ *   - ส่ง "TARGET:xxx\n" ไปยังบอร์ด 1 เมื่อกด '#'
+ *   - หากไม่มีการกดอะไรก็ตามเกิน 30s → เข้าสภาพ idle และ “ปล่อย WDT รีบูต” เพื่อความปลอดภัย
+ *
+ * ฮาร์ดแวร์/การต่อสาย:
+ *   - Keypad ADC ladder : A5 (PC5)
+ *   - LEDs              : GREEN=D4, YELLOW=D5, RED=D6 (แสดงสถานะพร้อม/กำลังตั้งค่า/ผิดพลาด)
+ *   - LCD 16x2          : RS=D8, E=D9, D4=D10, D5=D11, D6=D12, D7=D13
+ *
+ * โมดูลเวลา/ความปลอดภัย:
+ *   - Timer1 CTC 1ms tick → g_ms ใช้ตรวจ idle timeout
+ *   - Watchdog 2s → ถ้า idle นานเราตั้ง wdt_timeout=true เพื่อ “หยุดป้อน WDT” ให้รีบูตเอง
+ *   - UART 9600 8E1 → ส่งค่า TARGET อย่างง่าย
  */
 
 #define F_CPU 16000000UL
+#include <Arduino.h>
 #include <avr/io.h>
 #include <avr/interrupt.h>
 #include <avr/wdt.h>
@@ -18,31 +29,33 @@
 #include <stdbool.h>
 #include <string.h>
 
-/* ---------------- LCD ---------------- */
+// ---------------------- LCD (Library) ----------------------
 LiquidCrystal lcd(8, 9, 10, 11, 12, 13);
 
-/* ---------------- LEDs ---------------- */
-#define LED_GREEN  4
-#define LED_YELLOW 5
-#define LED_RED    6
+// ---------------------- LEDs สำหรับ UI ----------------------
+#define LED_GREEN  4  // พร้อม (idle)
+#define LED_YELLOW 5  // กำลังตั้งค่า
+#define LED_RED    6  // แจ้ง error (เช่น เกิน 999)
 
-/* ---------------- Globals ---------------- */
-volatile unsigned long g_ms = 0;     // 1ms tick
-static unsigned long idle_start_ms = 0;
-static volatile bool wdt_timeout = false;
+// ---------------------- Globals ----------------------
+volatile unsigned long g_ms = 0;     // 1ms tick จาก Timer1
+static unsigned long     idle_start_ms = 0; // เวลาล่าสุดที่มีการกดปุ่ม
+static volatile bool     wdt_timeout   = false; // ถ้า true → ปล่อย WDT ให้รีบูต
+static unsigned int      target_value  = 0; // ค่าที่ผู้ใช้กำลังป้อน (0..999)
 
-static unsigned int target_value = 0; // 0..999
-
-/* ---------------- Timer1 1ms ---------------- */
+// ---------------------- Timer1 1ms tick ----------------------
 static void timer1_init_1ms(void){
-  TCCR1A=0; TCCR1B=(1<<WGM12)|(1<<CS11)|(1<<CS10); OCR1A=249; TIMSK1=(1<<OCIE1A);
+  TCCR1A = 0;
+  TCCR1B = (1<<WGM12) | (1<<CS11) | (1<<CS10); // CTC, /64
+  OCR1A  = 249;                                 // 1kHz
+  TIMSK1 = (1<<OCIE1A);
 }
 ISR(TIMER1_COMPA_vect){ g_ms++; }
 
-/* ---------------- ADC ---------------- */
-static void adc_init(void){
-  ADMUX = (1<<REFS0); // AVcc
-  ADCSRA = (1<<ADEN)|(1<<ADPS2)|(1<<ADPS1)|(1<<ADPS0); // enable, /128
+// ---------------------- ADC (อ่าน A5) ----------------------
+static void     adc_init(void){
+  ADMUX  = (1<<REFS0); // AVcc เป็น reference
+  ADCSRA = (1<<ADEN)|(1<<ADPS2)|(1<<ADPS1)|(1<<ADPS0); // เปิด ADC, prescaler 128
 }
 static uint16_t adc_read(uint8_t ch){
   ADMUX = (ADMUX & 0xF0) | (ch & 0x0F);
@@ -51,24 +64,24 @@ static uint16_t adc_read(uint8_t ch){
   return ADC;
 }
 
-/* ---------------- USART0 9600 8E1 ---------------- */
+// ---------------------- USART0 9600 8E1 ----------------------
 static void usart0_init(void){
-  uint16_t ubrr=(F_CPU/(16UL*9600UL))-1;
-  UBRR0H=(ubrr>>8)&0xFF; UBRR0L=ubrr&0xFF;
-  UCSR0C=(1<<UPM01)|(1<<UCSZ01)|(1<<UCSZ00);
-  UCSR0B=(1<<TXEN0);
+  uint16_t ubrr = (F_CPU/(16UL*9600UL)) - 1;
+  UBRR0H = (ubrr>>8)&0xFF; UBRR0L = ubrr&0xFF;
+  UCSR0C = (1<<UPM01)|(1<<UCSZ01)|(1<<UCSZ00); // even parity, 8 data
+  UCSR0B = (1<<TXEN0); // ใช้ส่งอย่างเดียว
 }
 static void usart0_send_byte(uint8_t d){ while(!(UCSR0A&(1<<UDRE0))); UDR0=d; }
 static void usart0_send_string(const char*s){ while(*s) usart0_send_byte((uint8_t)*s++); }
 
-/* ---------------- LED helpers ---------------- */
+// ---------------------- LED helpers ----------------------
 static void leds_set(bool g, bool y, bool r){
   digitalWrite(LED_GREEN,  g?HIGH:LOW);
   digitalWrite(LED_YELLOW, y?HIGH:LOW);
   digitalWrite(LED_RED,    r?HIGH:LOW);
 }
 
-/* ---------------- Keypad decode (ตามช่วงที่เรียน) ---------------- */
+// ---------------------- Keypad decode (ช่วงค่า ADC ตามโพยที่เรียน) ----------------------
 static char decode_key(uint16_t adc){
   if (adc>= 50 && adc<= 80)  return '1';
   if (adc>= 90 && adc<=120)  return '2';
@@ -84,21 +97,21 @@ static char decode_key(uint16_t adc){
   if (adc>=490 && adc<=520)  return '#';
   return 0;
 }
-/* อ่านปุ่มพร้อม debounce 50ms + ตรวจค่านิ่ง */
+// อ่านปุ่มแบบ debouncing 50ms + ตรวจ “ค่านิ่ง” (abs(diff) ≤ 10) ก่อนจะยอมรับ
 static char keypad_getkey(void){
   static char last=0;
   uint16_t a1=adc_read(5); _delay_ms(50); uint16_t a2=adc_read(5);
   if ( (a1>33) && (abs((int)a2-(int)a1)<=10) ){
     char k=decode_key(a2);
-    if (k!=0 && k!=last){ last=k; return k; }
-    if (k==0) last=0;
+    if (k!=0 && k!=last){ last=k; return k; } // กดปุ่มใหม่ → ส่งคืน
+    if (k==0) last=0;                          // ปล่อยปุ่ม → เคลียร์
   } else {
-    last=0;
+    last=0; // ค่านิ่งไม่พอ → ไม่รับ
   }
   return 0;
 }
 
-/* ---------------- UI helpers ---------------- */
+// ---------------------- UI helpers ----------------------
 static void lcd_update(void){
   lcd.setCursor(0,0);
   char l0[17]; snprintf(l0,sizeof(l0),"Set Target:%3u",target_value);
@@ -111,22 +124,21 @@ static void send_target(unsigned v){
   usart0_send_string(buf);
 }
 
-/* ---------------- Main ---------------- */
+// ---------------------- main() ----------------------
 int main(void){
-  // IO
+  // LED output
   pinMode(LED_GREEN, OUTPUT);
   pinMode(LED_YELLOW,OUTPUT);
   pinMode(LED_RED,   OUTPUT);
-  leds_set(true,false,false);
+  leds_set(true,false,false); // เริ่มต้น: ไฟเขียว (พร้อม)
 
-  // modules
-  lcd.begin(16,2); lcd.clear(); lcd.print("Board2 Ready");
-  _delay_ms(600); lcd.clear();
+  // LCD + โมดูลเวลา + ADC + UART
+  lcd.begin(16,2); lcd.clear(); lcd.print("Board2 Ready"); _delay_ms(600); lcd.clear();
   timer1_init_1ms();
   adc_init();
   usart0_init();
 
-  // WDT 2s
+  // Watchdog 2s — กันค้าง/idle นานเกิน
   MCUSR &= ~(1<<WDRF);
   wdt_enable(WDTO_2S);
 
@@ -136,31 +148,32 @@ int main(void){
   idle_start_ms=g_ms;
 
   for(;;){
-    if (!wdt_timeout) wdt_reset();
+    if (!wdt_timeout) wdt_reset(); // keepalive WDT
 
-    // 30s ไม่มีการกด → กลับ idle และปล่อยให้ WDT รีบูต
+    // ถ้าไม่มีการกดปุ่ม > 30s → ปล่อย WDT ให้รีบูต
     if ((g_ms - idle_start_ms) > 30000UL){
       leds_set(true,false,false);
-      wdt_timeout = true; // จะไม่รีเซ็ต WDT อีก → รีบูตภายใน ~2s
+      wdt_timeout = true; // หยุด wdt_reset() → MCU จะรีบูตใน ~2s
     }
 
+    // อ่านปุ่ม
     char k = keypad_getkey();
     if (k){
-      idle_start_ms = g_ms; // มีการกด
-      leds_set(false,true,false);
+      idle_start_ms = g_ms;           // มี interaction → รีเซ็ต idle timer
+      leds_set(false,true,false);     // เหลือง: กำลังตั้งค่า
 
       if (k>='0' && k<='9'){
-        unsigned newv = target_value*10 + (k-'0');
+        unsigned newv = target_value*10 + (k-'0'); // ต่อเลขหลักใหม่
         if (newv<=999) target_value=newv;
-        else { // เกิน 999 → blink แดงสั้น ๆ
+        else { // เกิน 999 → แจ้งด้วยไฟแดงสั้น ๆ
           leds_set(false,false,true); _delay_ms(150); leds_set(false,true,false);
         }
         lcd_update();
       } else if (k=='*'){
-        target_value=0; lcd_update();
+        target_value=0; lcd_update(); // ล้างค่า
       } else if (k=='#'){
-        send_target(target_value);
-        leds_set(true,false,false);   // ส่งแล้วกลับพร้อมรับใหม่
+        send_target(target_value);    // ส่ง TARGET:xxx\n ไปบอร์ด 1
+        leds_set(true,false,false);   // กลับสภาพพร้อม
         lcd_update();
       }
     }
