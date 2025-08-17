@@ -1,0 +1,61 @@
+@startuml
+title ภาพรวมระบบ (ละเอียด อ่านง่าย) – UART 9600 8E1
+
+skinparam backgroundColor #ffffff
+skinparam sequence {
+  ArrowColor #333
+  ActorBorderColor #333
+  LifeLineBorderColor #999
+  LifeLineBackgroundColor #f7f7f7
+  ParticipantBorderColor #333
+  ParticipantBackgroundColor #eef6ff
+  BoxFontColor #333
+}
+skinparam note {
+  BackgroundColor #fff9c4
+  BorderColor #d4af37
+}
+
+actor "ผู้ใช้" as U
+participant "Board 2\n(Input: Keypad ADC + LCD)" as B2
+participant "Board 1\n(Sensor: LCD + HC-SR04 + Water A1)" as B1
+participant "Board 3\n(Monitor: 7-seg + LEDs + Packaging + Solenoid)" as B3
+
+== ตั้งเป้าหมาย ==
+U -> B2: กด 0..9 / * ล้าง / # ยืนยัน
+B2 -> B1: "TARGET:xxx\n"
+
+== รายงานสถานะ ==
+par loop ทุก ~200 ms (เมื่อมี target)
+  B1 -> B3: "PILLS:xxx\n"
+  B1 -> B3: "PROGRESS:yyy\n"
+end
+
+== น้ำสูง (Safety) ==
+alt Water% ≥ 80% ต่อเนื่อง
+  B1 -[#red]> B3: "WATER:HI\n"
+  note right of B3
+    เปิด Solenoid 3s เพื่อระบายน้ำ
+    หยุดนับเม็ดยาชั่วคราว
+  end note
+else ปกติ
+end
+
+== ครบ 100% ==
+alt progress ≥ 100%
+  B3 -[#blue]> B1: "RESET\n"
+  note over B3
+    Mode = CLEAN
+    · Packaging 5s (PD2)
+    · Solenoid 3s (PD3)
+    · แสดง "CLEn"
+  end note
+end
+
+== กรณี timeout ==
+alt ไม่มี serial กับ B1 > 30s
+  B1 -> B1: LCD แสดง "Timeout"
+  B1 -> B1: หยุดป้อน WDT ⇒ รีบูต (~2s)
+end
+
+@enduml

@@ -1,0 +1,52 @@
+@startuml
+title โฟลว์ Board 3 (7-seg + LEDs + Solenoid + Packaging)
+
+start
+:ตั้ง 7-seg multiplex (Timer2 = 1kHz);\nTimer0 = 1ms; USART0(9600 8E1);\nLEDs; PACK=PD2; SOL=PD3;
+:mode = RUN;\nlast_rx = ตอนนี้;
+
+while (ลูปหลัก) is (วน)
+  :poll UART → ต่อบรรทัด;
+  if (รับ "PILLS:xxx") then (ใช่)
+    :pills = xxx;
+  endif
+  if (รับ "PROGRESS:yyy") then (ใช่)
+    :progress = yyy;
+  endif
+  if (รับ "WATER:HI") then (ใช่)
+    :เปิด Solenoid ~3s ระบายน้ำ;
+  endif
+  :last_rx = ตอนข้อมูลล่าสุด;
+
+  if (เวลาห่างจาก last_rx > 30s?) then (ใช่)
+    :mode = TIMEOUT;
+  endif
+
+  if (mode == TIMEOUT) then (จริง)
+    :7-seg แสดง "----";\nไฟแดงค้าง;
+    if (มีข้อมูลใหม่?) then (ใช่)
+      :mode = RUN;
+    endif
+  elseif (mode == CLEAN) then (จริง)
+    :0..3s → SOL=ON;\n0..5s → PACK=ON;\n7-seg = "CLEn";
+    if (ครบ 5s?) then (ใช่)
+      :SOL=OFF; PACK=OFF;\nรีเซ็ต pills & progress;\nไฟเขียว;\nmode = RUN;
+    endif
+  else
+    :โหมดปกติ RUN → 7-seg แสดง\nซ้าย = pills%100, ขวา = progress%100;
+    if (progress < 50) then (เขียว)
+      :ไฟเขียว ON;
+    elseif (progress < 90) then (เหลือง)
+      :ไฟเหลือง ON;
+    elseif (progress < 100) then (แดง)
+      :ไฟแดง ON;
+    endif
+    if (progress ≥ 100) then (ครบ)
+      :mode = CLEAN;\nบันทึกเวลาเริ่มล้าง;\nส่ง "RESET\\n" ไป Board1;
+    endif
+  endif
+
+  :พักสั้น ~10ms (ลดภาระ CPU);
+endwhile
+stop
+@enduml

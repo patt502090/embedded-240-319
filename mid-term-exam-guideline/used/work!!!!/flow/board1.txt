@@ -1,0 +1,46 @@
+@startuml
+title โฟลว์ Board 1 (HC-SR04 + น้ำ A1 + LCD + UART)
+
+start
+:ตั้งค่าขา TRIG=D2, ECHO=D3, LED13;\nตั้ง ADC(A1), USART0(9600 8E1), LCD(16x2);\nTimer1 = 1ms tick; เปิด WDT(2s);
+:LCD แสดง "Board1 Ready";
+
+while (ลูปหลัก ทำงานตลอดเวลา) is (วน)
+  :ถ้าไม่ได้อยู่สถานะรอรีบูต → wdt_reset();
+
+  :อ่าน UART ทีละตัวอักษร → รวมเป็นบรรทัด;
+  if (บรรทัด = "TARGET:xxx") then (ใช่)
+    :target_count = xxx; have_target = true;
+  elseif (บรรทัด = "RESET") then (ใช่)
+    :pill_count = 0; progress = 0;
+  endif
+
+  :อ่านน้ำจาก ADC A1 → water%;
+  if (water% ≥ 80% ต่อเนื่อง?) then (ใช่)
+    :water_lock = true;\n(หยุดนับเม็ดยาชั่วคราวเพื่อความปลอดภัย);
+    if (ยังไม่ได้แจ้ง B3?) then (ใช่)
+      :ส่ง "WATER:HI\\n" ไป B3;
+    endif
+  elseif (water% ≤ 75% ?) then (ใช่)
+    :water_lock = false;\n(กลับมานับได้);
+  endif
+
+  if (ไม่มีสื่อสารเกิน 30s?) then (ใช่)
+    :LCD แสดง "Timeout!";\nกระพริบ LED13;\nตั้งแฟล็กหยุดป้อน WDT → MCU รีบูต;
+  endif
+
+  if (have_target และ !water_lock) then (ใช่)
+    :อ่าน HC-SR04 แบบ pulseIn 3 ครั้งติด;\nทุกค่าต้อง < 10 ซม.;
+    if (ผ่านเกณฑ์ และพ้นช่วง lockout 150ms?) then (ใช่)
+      :pill_count++;\nอัปเดต progress = pill*100/target;\nเริ่ม lockout 150ms;
+    endif
+  endif
+
+  if (have_target และ ครบ 200ms?) then (ใช่)
+    :ส่ง "PILLS:nnn\\n" และ "PROGRESS:ppp\\n" ไป B3;
+  endif
+
+  :อัปเดต LCD (Pills/Target, Progress%, Water%);
+endwhile
+stop
+@enduml

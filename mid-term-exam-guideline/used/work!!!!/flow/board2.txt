@@ -1,0 +1,31 @@
+@startuml
+title โฟลว์ Board 2 (Keypad ADC A5 + LCD + UART)
+
+start
+:ตั้ง LED สถานะ (G=D4,Y=D5,R=D6);\nLCD 16x2;\nADC(A5);\nUSART0(9600 8E1);\nTimer1=1ms; เปิด WDT(2s);
+:target_value = 0;\nLCD: "Set Target:000";
+
+while (ลูปหลัก) is (วน)
+  :wdt_reset();
+
+  if (นิ่ง > 30s ?) then (ใช่)
+    :ไฟเขียว (พร้อมรอใหม่);\nตั้งให้ WDT รีบูต (ปล่อยไม่รีเซ็ต);
+  endif
+
+  :อ่าน ADC A5 สองครั้งห่าง 50ms → ตรวจค่านิ่ง;
+  :แม็พเป็นปุ่ม 0..9, *, # (ตามช่วงแรงดัน);
+
+  if (มีคีย์ใหม่?) then (ใช่)
+    :ตั้ง idle = ตอนนี้;\nไฟเหลือง (กำลังตั้งค่า);
+    if (ตัวเลข 0..9) then (ใช่)
+      :target = target*10 + digit (ไม่เกิน 999);\nถ้าเกิน → ไฟแดงกระพริบสั้น;
+      :อัปเดต LCD;
+    elseif (*) then (ใช่)
+      :ล้างค่า target = 0;\nอัปเดต LCD;
+    elseif (#) then (ใช่)
+      :ส่ง "TARGET:xxx\\n" ไป Board1;\nไฟเขียว (พร้อมรับใหม่);\nอัปเดต LCD;
+    endif
+  endif
+endwhile
+stop
+@enduml
