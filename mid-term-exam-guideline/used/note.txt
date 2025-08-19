@@ -3,7 +3,7 @@ Board-1 : Sensor & Display
 UART (รับจาก Board-2)
 
 B2 TXD → B1 RXD (PD0)
-
+1
 GND ร่วม
 
 UART (ส่งไป Board-3)
